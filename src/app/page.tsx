@@ -21,6 +21,7 @@ import {
   Clock,
   DollarSign,
   Eye,
+  EyeOff,
   LogOut,
   CheckCircle,
   AlertCircle,
@@ -33,12 +34,17 @@ import {
   ClipboardList,
   Receipt,
   Users,
-  FileCheck
+  FileCheck,
+  ZoomIn,
+  UserCheck,
+  UserX
 } from 'lucide-react'
+import PWAInstallPrompt from '@/components/PWAInstallPrompt'
 
 // Tipos de dados
 interface Client {
   id: string
+  name: string
   username: string
   password: string
   approved: boolean
@@ -103,12 +109,23 @@ interface Voucher {
   createdAt: string
 }
 
+interface AttendanceRecord {
+  id: string
+  clientId: string
+  collaboratorId: string
+  date: string
+  morning: boolean
+  afternoon: boolean
+  weekNumber: number
+  year: number
+}
+
 // Componente principal
 export default function WippelApp() {
   // Estados principais
   const [darkMode, setDarkMode] = useState(false)
   const [currentUser, setCurrentUser] = useState<{ type: 'client' | 'engineer', id: string } | null>(null)
-  const [currentView, setCurrentView] = useState<'login' | 'pending' | 'dashboard' | 'client-detail' | 'create-client'>('login')
+  const [currentView, setCurrentView] = useState<'login' | 'pending' | 'dashboard' | 'client-detail' | 'create-client' | 'edit-credentials'>('login')
   const [selectedClientId, setSelectedClientId] = useState<string>('')
   const [loginError, setLoginError] = useState<string>('')
   
@@ -120,10 +137,11 @@ export default function WippelApp() {
   const [financialEntries, setFinancialEntries] = useState<FinancialEntry[]>([])
   const [collaborators, setCollaborators] = useState<Collaborator[]>([])
   const [vouchers, setVouchers] = useState<Voucher[]>([])
+  const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([])
   
   // Estados de formulários
   const [loginForm, setLoginForm] = useState({ identifier: '', password: '' })
-  const [clientForm, setClientForm] = useState({ username: '', password: '' })
+  const [clientForm, setClientForm] = useState({ name: '', username: '', password: '' })
   const [activeTab, setActiveTab] = useState<'diary' | 'schedule' | 'financial' | 'invoices' | 'collaborators' | 'vouchers'>('diary')
   const [financialTab, setFinancialTab] = useState<'entries' | 'summary'>('entries')
   
@@ -134,6 +152,10 @@ export default function WippelApp() {
   const [showFinancialForm, setShowFinancialForm] = useState(false)
   const [showCollaboratorForm, setShowCollaboratorForm] = useState(false)
   const [showVoucherForm, setShowVoucherForm] = useState(false)
+  const [showMediaViewer, setShowMediaViewer] = useState(false)
+  const [mediaViewerSrc, setMediaViewerSrc] = useState('')
+  const [showCredentialsForm, setShowCredentialsForm] = useState(false)
+  const [editingClientId, setEditingClientId] = useState<string>('')
   
   // Estados de edição
   const [editingDiary, setEditingDiary] = useState<string | null>(null)
@@ -149,6 +171,11 @@ export default function WippelApp() {
   const [financialForm, setFinancialForm] = useState({ type: 'income' as 'income' | 'expense', date: '', description: '', amount: 0 })
   const [collaboratorForm, setCollaboratorForm] = useState({ name: '', role: '', startDate: '', endDate: '' })
   const [voucherForm, setVoucherForm] = useState({ title: '', attachment: '', photo: '' })
+  const [credentialsForm, setCredentialsForm] = useState({ name: '', username: '', password: '' })
+
+  // Estados para mostrar/ocultar senhas
+  const [showLoginPassword, setShowLoginPassword] = useState(false)
+  const [showCredentialsPassword, setShowCredentialsPassword] = useState(false)
 
   // Refs para upload de arquivos
   const diaryImageInputRef = useRef<HTMLInputElement>(null)
@@ -169,6 +196,7 @@ export default function WippelApp() {
       setFinancialEntries(data.financialEntries || [])
       setCollaborators(data.collaborators || [])
       setVouchers(data.vouchers || [])
+      setAttendanceRecords(data.attendanceRecords || [])
     }
     
     const savedTheme = localStorage.getItem('wippel-theme')
@@ -186,10 +214,11 @@ export default function WippelApp() {
       invoices,
       financialEntries,
       collaborators,
-      vouchers
+      vouchers,
+      attendanceRecords
     }
     localStorage.setItem('wippel-app-data', JSON.stringify(data))
-  }, [clients, diaryEntries, scheduleItems, invoices, financialEntries, collaborators, vouchers])
+  }, [clients, diaryEntries, scheduleItems, invoices, financialEntries, collaborators, vouchers, attendanceRecords])
 
   // Salvar tema
   useEffect(() => {
@@ -204,6 +233,18 @@ export default function WippelApp() {
       reader.onload = () => resolve(reader.result as string)
       reader.onerror = error => reject(error)
     })
+  }
+
+  // Função para abrir visualizador de mídia
+  const openMediaViewer = (src: string) => {
+    setMediaViewerSrc(src)
+    setShowMediaViewer(true)
+  }
+
+  // Função para fechar visualizador de mídia
+  const closeMediaViewer = () => {
+    setShowMediaViewer(false)
+    setMediaViewerSrc('')
   }
 
   // Funções de autenticação
@@ -242,8 +283,8 @@ export default function WippelApp() {
   }
 
   const createClient = () => {
-    if (!clientForm.username.trim() || !clientForm.password.trim()) {
-      alert('Por favor, preencha usuário e senha')
+    if (!clientForm.name.trim() || !clientForm.username.trim() || !clientForm.password.trim()) {
+      alert('Por favor, preencha nome, usuário e senha')
       return
     }
 
@@ -256,13 +297,14 @@ export default function WippelApp() {
 
     const newClient: Client = {
       id: Date.now().toString(),
+      name: clientForm.name,
       username: clientForm.username,
       password: clientForm.password,
       approved: true, // Engenheiro cria já aprovado
       createdAt: new Date().toISOString()
     }
     setClients([...clients, newClient])
-    setClientForm({ username: '', password: '' })
+    setClientForm({ name: '', username: '', password: '' })
     setCurrentView('dashboard')
     alert('Cliente criado com sucesso!')
   }
@@ -279,6 +321,42 @@ export default function WippelApp() {
     setFinancialEntries(financialEntries.filter(f => f.clientId !== clientId))
     setCollaborators(collaborators.filter(c => c.clientId !== clientId))
     setVouchers(vouchers.filter(v => v.clientId !== clientId))
+    setAttendanceRecords(attendanceRecords.filter(a => a.clientId !== clientId))
+  }
+
+  // Função para editar credenciais do cliente
+  const editClientCredentials = (clientId: string) => {
+    const client = clients.find(c => c.id === clientId)
+    if (client) {
+      setEditingClientId(clientId)
+      setCredentialsForm({ name: client.name, username: client.username, password: client.password })
+      setShowCredentialsForm(true)
+    }
+  }
+
+  const updateClientCredentials = () => {
+    if (!credentialsForm.name.trim() || !credentialsForm.username.trim() || !credentialsForm.password.trim()) {
+      alert('Por favor, preencha nome, usuário e senha')
+      return
+    }
+
+    // Verificar se usuário já existe (exceto o atual)
+    const existingClient = clients.find(c => c.username === credentialsForm.username && c.id !== editingClientId)
+    if (existingClient) {
+      alert('Este usuário já existe')
+      return
+    }
+
+    setClients(clients.map(c => 
+      c.id === editingClientId 
+        ? { ...c, name: credentialsForm.name, username: credentialsForm.username, password: credentialsForm.password }
+        : c
+    ))
+    
+    setShowCredentialsForm(false)
+    setEditingClientId('')
+    setCredentialsForm({ name: '', username: '', password: '' })
+    alert('Credenciais atualizadas com sucesso!')
   }
 
   // Funções do Diário da Obra
@@ -547,6 +625,61 @@ export default function WippelApp() {
 
   const deleteCollaborator = (collaboratorId: string) => {
     setCollaborators(collaborators.filter(c => c.id !== collaboratorId))
+    // Remover também os registros de presença deste colaborador
+    setAttendanceRecords(attendanceRecords.filter(a => a.collaboratorId !== collaboratorId))
+  }
+
+  // Funções de Lista de Presença
+  const getCurrentWeek = () => {
+    const now = new Date()
+    const startOfYear = new Date(now.getFullYear(), 0, 1)
+    const pastDaysOfYear = (now.getTime() - startOfYear.getTime()) / 86400000
+    return Math.ceil((pastDaysOfYear + startOfYear.getDay() + 1) / 7)
+  }
+
+  const toggleAttendance = (collaboratorId: string, period: 'morning' | 'afternoon') => {
+    const today = new Date().toISOString().split('T')[0]
+    const currentWeek = getCurrentWeek()
+    const currentYear = new Date().getFullYear()
+
+    const existingRecord = attendanceRecords.find(
+      record => record.collaboratorId === collaboratorId && 
+                record.date === today && 
+                record.clientId === selectedClientId
+    )
+
+    if (existingRecord) {
+      // Atualizar registro existente
+      setAttendanceRecords(attendanceRecords.map(record =>
+        record.id === existingRecord.id
+          ? { 
+              ...record, 
+              [period]: !record[period]
+            }
+          : record
+      ))
+    } else {
+      // Criar novo registro
+      const newRecord: AttendanceRecord = {
+        id: Date.now().toString(),
+        clientId: selectedClientId,
+        collaboratorId,
+        date: today,
+        morning: period === 'morning',
+        afternoon: period === 'afternoon',
+        weekNumber: currentWeek,
+        year: currentYear
+      }
+      setAttendanceRecords([...attendanceRecords, newRecord])
+    }
+  }
+
+  const getAttendanceForCollaborator = (collaboratorId: string, date: string) => {
+    return attendanceRecords.find(
+      record => record.collaboratorId === collaboratorId && 
+                record.date === date && 
+                record.clientId === selectedClientId
+    )
   }
 
   // Funções dos Comprovantes
@@ -644,12 +777,12 @@ export default function WippelApp() {
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-2">
             <img 
-              src="https://k6hrqrxuu8obbfwn.public.blob.vercel-storage.com/temp/676f2575-5d35-4753-b050-29dc1c2bae17.png" 
+              src="https://k6hrqrxuu8obbfwn.public.blob.vercel-storage.com/temp/b926537c-4ac1-40b9-90f2-a4a516b8859a.png" 
               alt="Wippel Logo" 
               className="h-6 w-auto sm:h-8 sm:w-auto" 
             />
             <div>
-              <h1 className="text-sm sm:text-lg font-bold text-black">Wippel Arquitetura & Engenharia</h1>
+              <h1 className="text-sm sm:text-lg font-bold dark:text-white">Wippel Arquitetura & Engenharia</h1>
             </div>
           </div>
           
@@ -686,13 +819,35 @@ export default function WippelApp() {
         </div>
       </header>
 
+      {/* PWA Install Prompt */}
+      <PWAInstallPrompt />
+
+      {/* Visualizador de Mídia */}
+      {showMediaViewer && (
+        <div className="fixed inset-0 bg-black bg-opacity-90 flex items-center justify-center z-50 p-4">
+          <div className="relative max-w-full max-h-full">
+            <button
+              onClick={closeMediaViewer}
+              className="absolute top-4 right-4 text-white bg-black bg-opacity-50 rounded-full p-2 hover:bg-opacity-70 transition-colors z-10"
+            >
+              <X className="h-6 w-6" />
+            </button>
+            <img 
+              src={mediaViewerSrc} 
+              alt="Visualização ampliada" 
+              className="max-w-full max-h-full object-contain rounded-lg"
+            />
+          </div>
+        </div>
+      )}
+
       {/* Tela de Login - Mobile Optimized */}
       {currentView === 'login' && (
         <div className="flex items-center justify-center min-h-[calc(100vh-60px)] p-3">
           <div className={`${cardClass} rounded-2xl border p-6 w-full max-w-sm`}>
             <div className="text-center mb-6">
               <img 
-                src="https://k6hrqrxuu8obbfwn.public.blob.vercel-storage.com/temp/676f2575-5d35-4753-b050-29dc1c2bae17.png" 
+                src="https://k6hrqrxuu8obbfwn.public.blob.vercel-storage.com/temp/b926537c-4ac1-40b9-90f2-a4a516b8859a.png" 
                 alt="Wippel Logo" 
                 className="h-12 w-auto mx-auto mb-3" 
               />
@@ -723,16 +878,25 @@ export default function WippelApp() {
               
               <div>
                 <label className="block text-sm font-medium mb-1">Senha</label>
-                <input
-                  type="password"
-                  value={loginForm.password}
-                  onChange={(e) => {
-                    setLoginForm({...loginForm, password: e.target.value})
-                    setLoginError('')
-                  }}
-                  className={`w-full px-3 py-3 rounded-xl border ${inputClass} focus:ring-2 focus:ring-[#C02C33] focus:border-transparent text-base`}
-                  placeholder="••••••••"
-                />
+                <div className="relative">
+                  <input
+                    type={showLoginPassword ? "text" : "password"}
+                    value={loginForm.password}
+                    onChange={(e) => {
+                      setLoginForm({...loginForm, password: e.target.value})
+                      setLoginError('')
+                    }}
+                    className={`w-full px-3 py-3 pr-12 rounded-xl border ${inputClass} focus:ring-2 focus:ring-[#C02C33] focus:border-transparent text-base`}
+                    placeholder="••••••••"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowLoginPassword(!showLoginPassword)}
+                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                  >
+                    {showLoginPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                  </button>
+                </div>
               </div>
               
               <button
@@ -847,12 +1011,19 @@ export default function WippelApp() {
                               {client.approved ? <CheckCircle className="h-4 w-4" /> : <Clock className="h-4 w-4" />}
                             </div>
                             <div className="min-w-0 flex-1">
-                              <h4 className="font-medium text-sm truncate">{client.username}</h4>
+                              <h4 className="font-medium text-sm truncate">{client.name}</h4>
                             </div>
                           </div>
                         </div>
                         
                         <div className="flex items-center space-x-1 flex-shrink-0">
+                          <button
+                            onClick={() => editClientCredentials(client.id)}
+                            className="p-1 text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
+                            title="Editar credenciais"
+                          >
+                            <Settings className="h-3 w-3" />
+                          </button>
                           {!client.approved && (
                             <button
                               onClick={() => approveClient(client.id)}
@@ -875,6 +1046,74 @@ export default function WippelApp() {
               )}
             </div>
           </div>
+
+          {/* Modal de Edição de Credenciais */}
+          {showCredentialsForm && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-3 z-50">
+              <div className={`${cardClass} rounded-2xl p-4 w-full max-w-sm`}>
+                <h4 className="text-lg font-bold mb-4">Editar Credenciais</h4>
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Nome do Cliente</label>
+                    <input
+                      type="text"
+                      value={credentialsForm.name}
+                      onChange={(e) => setCredentialsForm({...credentialsForm, name: e.target.value})}
+                      className={`w-full px-3 py-2 rounded-lg border ${inputClass} text-base`}
+                      placeholder="Nome completo do cliente"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Usuário</label>
+                    <input
+                      type="text"
+                      value={credentialsForm.username}
+                      onChange={(e) => setCredentialsForm({...credentialsForm, username: e.target.value})}
+                      className={`w-full px-3 py-2 rounded-lg border ${inputClass} text-base`}
+                      placeholder="Nome de usuário"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Senha</label>
+                    <div className="relative">
+                      <input
+                        type={showCredentialsPassword ? "text" : "password"}
+                        value={credentialsForm.password}
+                        onChange={(e) => setCredentialsForm({...credentialsForm, password: e.target.value})}
+                        className={`w-full px-3 py-2 pr-12 rounded-lg border ${inputClass} text-base`}
+                        placeholder="Nova senha"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowCredentialsPassword(!showCredentialsPassword)}
+                        className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                      >
+                        {showCredentialsPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="flex space-x-2 pt-2">
+                    <button
+                      onClick={updateClientCredentials}
+                      className="flex-1 bg-[#C02C33] text-white py-2 rounded-lg hover:bg-[#A02329] transition-colors text-base"
+                    >
+                      Salvar
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowCredentialsForm(false)
+                        setEditingClientId('')
+                        setCredentialsForm({ name: '', username: '', password: '' })
+                      }}
+                      className="flex-1 border border-gray-300 py-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-base"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -890,13 +1129,24 @@ export default function WippelApp() {
             
             <div className="space-y-4">
               <div>
+                <label className="block text-sm font-medium mb-1">Nome do Cliente</label>
+                <input
+                  type="text"
+                  value={clientForm.name}
+                  onChange={(e) => setClientForm({...clientForm, name: e.target.value})}
+                  className={`w-full px-3 py-3 rounded-xl border ${inputClass} focus:ring-2 focus:ring-[#C02C33] focus:border-transparent text-base`}
+                  placeholder="Nome completo do cliente"
+                />
+              </div>
+              
+              <div>
                 <label className="block text-sm font-medium mb-1">Usuário</label>
                 <input
                   type="text"
                   value={clientForm.username}
                   onChange={(e) => setClientForm({...clientForm, username: e.target.value})}
                   className={`w-full px-3 py-3 rounded-xl border ${inputClass} focus:ring-2 focus:ring-[#C02C33] focus:border-transparent text-base`}
-                  placeholder="Nome de usuário"
+                  placeholder="Nome de usuário para login"
                 />
               </div>
               
@@ -944,7 +1194,7 @@ export default function WippelApp() {
                 </button>
               )}
               {currentUser?.type === 'engineer' && (
-                <h2 className="text-lg font-bold truncate">{currentClient.username}</h2>
+                <h2 className="text-lg font-bold truncate">{currentClient.name}</h2>
               )}
               <div></div>
             </div>
@@ -1031,7 +1281,20 @@ export default function WippelApp() {
                           </div>
                           <p className="text-sm mb-3">{entry.description}</p>
                           {entry.image && (
-                            <img src={entry.image} alt="" className="w-full h-40 object-cover rounded-lg" />
+                            <div className="relative">
+                              <img 
+                                src={entry.image} 
+                                alt="" 
+                                className="w-full h-40 object-cover rounded-lg cursor-pointer hover:opacity-90 transition-opacity" 
+                                onClick={() => openMediaViewer(entry.image)}
+                              />
+                              <button
+                                onClick={() => openMediaViewer(entry.image)}
+                                className="absolute top-2 right-2 bg-black bg-opacity-50 text-white p-1 rounded-full hover:bg-opacity-70 transition-colors"
+                              >
+                                <ZoomIn className="h-4 w-4" />
+                              </button>
+                            </div>
                           )}
                         </div>
                       ))}
@@ -1559,7 +1822,20 @@ export default function WippelApp() {
                                 </div>
                               )}
                               {invoice.photo && (
-                                <img src={invoice.photo} alt="" className="w-full h-32 object-cover rounded-lg" />
+                                <div className="relative">
+                                  <img 
+                                    src={invoice.photo} 
+                                    alt="" 
+                                    className="w-full h-32 object-cover rounded-lg cursor-pointer hover:opacity-90 transition-opacity" 
+                                    onClick={() => openMediaViewer(invoice.photo)}
+                                  />
+                                  <button
+                                    onClick={() => openMediaViewer(invoice.photo)}
+                                    className="absolute top-2 right-2 bg-black bg-opacity-50 text-white p-1 rounded-full hover:bg-opacity-70 transition-colors"
+                                  >
+                                    <ZoomIn className="h-4 w-4" />
+                                  </button>
+                                </div>
                               )}
                             </div>
                           )}
@@ -1668,6 +1944,55 @@ export default function WippelApp() {
                     <p className={`${textSecondaryClass} text-center py-8 text-sm`}>Nenhum colaborador cadastrado ainda.</p>
                   ) : (
                     <div className="space-y-4">
+                      {/* Lista de Presença Diária */}
+                      {currentUser?.type === 'engineer' && (
+                        <div className={`p-4 rounded-xl border ${darkMode ? 'border-gray-700 bg-gray-800/50' : 'border-gray-200 bg-gray-50'}`}>
+                          <h4 className="font-bold text-sm mb-3">Lista de Presença - {new Date().toLocaleDateString('pt-BR')}</h4>
+                          <div className="space-y-3">
+                            {clientCollaborators.map(collaborator => {
+                              const today = new Date().toISOString().split('T')[0]
+                              const attendance = getAttendanceForCollaborator(collaborator.id, today)
+                              
+                              return (
+                                <div key={collaborator.id} className={`p-3 rounded-lg border ${darkMode ? 'border-gray-600 bg-gray-700' : 'border-gray-300 bg-white'}`}>
+                                  <div className="flex items-center justify-between mb-2">
+                                    <div>
+                                      <h5 className="font-medium text-sm">{collaborator.name}</h5>
+                                      <p className="text-xs text-gray-500">{collaborator.role}</p>
+                                    </div>
+                                  </div>
+                                  <div className="flex space-x-4">
+                                    <button
+                                      onClick={() => toggleAttendance(collaborator.id, 'morning')}
+                                      className={`flex items-center space-x-2 px-3 py-2 rounded-lg text-sm transition-colors ${
+                                        attendance?.morning 
+                                          ? 'bg-green-500 text-white' 
+                                          : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-500'
+                                      }`}
+                                    >
+                                      {attendance?.morning ? <UserCheck className="h-4 w-4" /> : <UserX className="h-4 w-4" />}
+                                      <span>Manhã</span>
+                                    </button>
+                                    <button
+                                      onClick={() => toggleAttendance(collaborator.id, 'afternoon')}
+                                      className={`flex items-center space-x-2 px-3 py-2 rounded-lg text-sm transition-colors ${
+                                        attendance?.afternoon 
+                                          ? 'bg-green-500 text-white' 
+                                          : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-500'
+                                      }`}
+                                    >
+                                      {attendance?.afternoon ? <UserCheck className="h-4 w-4" /> : <UserX className="h-4 w-4" />}
+                                      <span>Tarde</span>
+                                    </button>
+                                  </div>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Lista de Colaboradores */}
                       {clientCollaborators.map(collaborator => (
                         <div key={collaborator.id} className={`p-3 rounded-xl border ${darkMode ? 'border-gray-700' : 'border-gray-200'}`}>
                           <div className="flex items-start justify-between mb-2">
@@ -1837,7 +2162,20 @@ export default function WippelApp() {
                                 </div>
                               )}
                               {voucher.photo && (
-                                <img src={voucher.photo} alt="" className="w-full h-32 object-cover rounded-lg" />
+                                <div className="relative">
+                                  <img 
+                                    src={voucher.photo} 
+                                    alt="" 
+                                    className="w-full h-32 object-cover rounded-lg cursor-pointer hover:opacity-90 transition-opacity" 
+                                    onClick={() => openMediaViewer(voucher.photo)}
+                                  />
+                                  <button
+                                    onClick={() => openMediaViewer(voucher.photo)}
+                                    className="absolute top-2 right-2 bg-black bg-opacity-50 text-white p-1 rounded-full hover:bg-opacity-70 transition-colors"
+                                  >
+                                    <ZoomIn className="h-4 w-4" />
+                                  </button>
+                                </div>
                               )}
                             </div>
                           )}
